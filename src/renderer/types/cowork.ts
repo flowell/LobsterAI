@@ -66,6 +66,8 @@ export interface CoworkConfig {
   memoryLlmJudgeEnabled: boolean;
   memoryGuardLevel: 'strict' | 'standard' | 'relaxed';
   memoryUserMemoriesMaxItems: number;
+  /** 发送消息快捷键: 'enter' 表示按 Enter 发送, 'ctrl_enter' 表示按 Ctrl+Enter 发送 */
+  sendShortcut?: 'enter' | 'ctrl_enter';
 }
 
 export type CoworkConfigUpdate = Partial<Pick<
@@ -78,6 +80,7 @@ export type CoworkConfigUpdate = Partial<Pick<
   | 'memoryLlmJudgeEnabled'
   | 'memoryGuardLevel'
   | 'memoryUserMemoriesMaxItems'
+  | 'sendShortcut'
 >>;
 
 export interface CoworkApiConfig {

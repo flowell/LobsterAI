@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { PaperAirplaneIcon, StopIcon, FolderIcon } from '@heroicons/react/24/solid';
-import { PhotoIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { PhotoIcon, ExclamationTriangleIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
 import PaperClipIcon from '../icons/PaperClipIcon';
 import XMarkIcon from '../icons/XMarkIcon';
 import ModelSelector from '../ModelSelector';
@@ -10,7 +10,7 @@ import { SkillsButton, ActiveSkillBadge } from '../skills';
 import { i18nService } from '../../services/i18n';
 import { skillService } from '../../services/skill';
 import { RootState } from '../../store';
-import { setDraftPrompt } from '../../store/slices/coworkSlice';
+import { setDraftPrompt, updateConfig } from '../../store/slices/coworkSlice';
 import { setSkills, toggleActiveSkill } from '../../store/slices/skillSlice';
 import { Skill } from '../../types/skill';
 import { CoworkImageAttachment } from '../../types/cowork';
@@ -115,6 +115,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     const dispatch = useDispatch();
     const draftKey = sessionId || '__home__';
     const draftPrompt = useSelector((state: RootState) => state.cowork.draftPrompts[draftKey] || '');
+    const sendShortcut = useSelector((state: RootState) => state.cowork.config.sendShortcut || 'enter');
     const [value, setValue] = useState(draftPrompt);
     const [attachments, setAttachments] = useState<CoworkAttachment[]>([]);
     const [showFolderMenu, setShowFolderMenu] = useState(false);
@@ -122,9 +123,11 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     const [isDraggingFiles, setIsDraggingFiles] = useState(false);
     const [isAddingFile, setIsAddingFile] = useState(false);
     const [imageVisionHint, setImageVisionHint] = useState(false);
+    const [showSendShortcutMenu, setShowSendShortcutMenu] = useState(false);
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const folderButtonRef = useRef<HTMLButtonElement>(null);
+    const sendShortcutButtonRef = useRef<HTMLButtonElement>(null);
     const dragDepthRef = useRef(0);
 
   // 暴露方法给父组件
@@ -289,17 +292,28 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
   }, [onManageSkills]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Enter to submit, any modifier+Enter (Shift/Ctrl/Cmd/Alt) for new line
     const isComposing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
     if (event.key === 'Enter' && !isComposing) {
       const hasModifier = event.shiftKey || event.ctrlKey || event.metaKey || event.altKey;
-      if (!hasModifier && !isStreaming && !disabled) {
-        event.preventDefault();
-        handleSubmit();
-      } else if (hasModifier && !event.shiftKey) {
-        // Shift+Enter already inserts newline natively; for Ctrl/Cmd/Alt+Enter, insert via execCommand to preserve undo history
-        event.preventDefault();
-        document.execCommand('insertText', false, '\n');
+      
+      if (sendShortcut === 'enter') {
+        // 模式1: 按 Enter 发送, Shift/Ctrl/Cmd/Alt+Enter 换行
+        if (!hasModifier && !isStreaming && !disabled) {
+          event.preventDefault();
+          handleSubmit();
+        } else if (hasModifier && !event.shiftKey) {
+          // Shift+Enter 已经是原生换行; Ctrl/Cmd/Alt+Enter 通过 execCommand 插入换行以保留撤销历史
+          event.preventDefault();
+          document.execCommand('insertText', false, '\n');
+        }
+      } else {
+        // 模式2: 按 Ctrl+Enter 发送, Enter 换行
+        const isCtrlEnter = event.ctrlKey || event.metaKey;
+        if (isCtrlEnter && !isStreaming && !disabled) {
+          event.preventDefault();
+          handleSubmit();
+        }
+        // 单独的 Enter 键保持原生行为(换行)
       }
     }
   };
@@ -309,6 +323,11 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
       onStop();
     }
   };
+
+  const handleSendShortcutChange = useCallback((shortcut: 'enter' | 'ctrl_enter') => {
+    dispatch(updateConfig({ sendShortcut: shortcut }));
+    setShowSendShortcutMenu(false);
+  }, [dispatch]);
 
   const containerClass = isLarge
     ? 'relative rounded-2xl border dark:border-claude-darkBorder border-claude-border dark:bg-claude-darkSurface bg-claude-surface shadow-card focus-within:shadow-elevated focus-within:ring-1 focus-within:ring-claude-accent/40 focus-within:border-claude-accent'
@@ -723,15 +742,70 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
                     <StopIcon className="h-5 w-5" />
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={handleSubmit}
-                    disabled={!canSubmit}
-                    className="p-2 rounded-xl bg-claude-accent hover:bg-claude-accentHover text-white transition-all shadow-subtle hover:shadow-card active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                    aria-label="Send"
-                  >
-                    <PaperAirplaneIcon className="h-5 w-5" />
-                  </button>
+                  <div className="relative flex items-center">
+                    <button
+                      type="button"
+                      onClick={handleSubmit}
+                      disabled={!canSubmit}
+                      className="p-2 rounded-l-xl bg-claude-accent hover:bg-claude-accentHover text-white transition-all shadow-subtle hover:shadow-card active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label="Send"
+                      title={sendShortcut === 'enter' ? '按 Enter 发送' : '按 Ctrl+Enter 发送'}
+                    >
+                      <PaperAirplaneIcon className="h-5 w-5" />
+                    </button>
+                    <button
+                      ref={sendShortcutButtonRef}
+                      type="button"
+                      onClick={() => setShowSendShortcutMenu(!showSendShortcutMenu)}
+                      className="p-2 rounded-r-xl bg-claude-accent hover:bg-claude-accentHover text-white transition-all shadow-subtle hover:shadow-card active:scale-95 border-l border-white/20"
+                      aria-label="发送快捷键设置"
+                      title="发送快捷键设置"
+                    >
+                      <ChevronDownIcon className="h-4 w-4" />
+                    </button>
+                    {showSendShortcutMenu && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-40"
+                          onClick={() => setShowSendShortcutMenu(false)}
+                        />
+                        <div className="absolute right-0 bottom-full mb-2 w-48 rounded-lg shadow-lg dark:bg-claude-darkSurface bg-claude-surface border dark:border-claude-darkBorder border-claude-border z-50 overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => handleSendShortcutChange('enter')}
+                            className={`w-full px-4 py-2.5 text-left text-sm transition-colors flex items-center justify-between ${
+                              sendShortcut === 'enter'
+                                ? 'bg-claude-accent/10 text-claude-accent'
+                                : 'dark:text-claude-darkText text-claude-text hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'
+                            }`}
+                          >
+                            <span>按 Enter 发送</span>
+                            {sendShortcut === 'enter' && (
+                              <svg className="h-4 w-4 text-claude-accent" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSendShortcutChange('ctrl_enter')}
+                            className={`w-full px-4 py-2.5 text-left text-sm transition-colors flex items-center justify-between ${
+                              sendShortcut === 'ctrl_enter'
+                                ? 'bg-claude-accent/10 text-claude-accent'
+                                : 'dark:text-claude-darkText text-claude-text hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'
+                            }`}
+                          >
+                            <span>按 Ctrl+Enter 发送</span>
+                            {sendShortcut === 'ctrl_enter' && (
+                              <svg className="h-4 w-4 text-claude-accent" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -775,15 +849,69 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
                 <StopIcon className="h-4 w-4" />
               </button>
             ) : (
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!canSubmit}
-                className="flex-shrink-0 p-2 rounded-lg bg-claude-accent hover:bg-claude-accentHover text-white transition-all shadow-subtle hover:shadow-card active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                aria-label="Send"
-              >
-                <PaperAirplaneIcon className="h-4 w-4" />
-              </button>
+              <div className="relative flex items-center flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={handleSubmit}
+                  disabled={!canSubmit}
+                  className="p-2 rounded-l-lg bg-claude-accent hover:bg-claude-accentHover text-white transition-all shadow-subtle hover:shadow-card active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Send"
+                  title={sendShortcut === 'enter' ? '按 Enter 发送' : '按 Ctrl+Enter 发送'}
+                >
+                  <PaperAirplaneIcon className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSendShortcutMenu(!showSendShortcutMenu)}
+                  className="p-1.5 rounded-r-lg bg-claude-accent hover:bg-claude-accentHover text-white transition-all shadow-subtle hover:shadow-card active:scale-95 border-l border-white/20"
+                  aria-label="发送快捷键设置"
+                  title="发送快捷键设置"
+                >
+                  <ChevronDownIcon className="h-3 w-3" />
+                </button>
+                {showSendShortcutMenu && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setShowSendShortcutMenu(false)}
+                    />
+                    <div className="absolute right-0 bottom-full mb-2 w-44 rounded-lg shadow-lg dark:bg-claude-darkSurface bg-claude-surface border dark:border-claude-darkBorder border-claude-border z-50 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => handleSendShortcutChange('enter')}
+                        className={`w-full px-3 py-2 text-left text-xs transition-colors flex items-center justify-between ${
+                          sendShortcut === 'enter'
+                            ? 'bg-claude-accent/10 text-claude-accent'
+                            : 'dark:text-claude-darkText text-claude-text hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'
+                        }`}
+                      >
+                        <span>按 Enter 发送</span>
+                        {sendShortcut === 'enter' && (
+                          <svg className="h-3.5 w-3.5 text-claude-accent" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSendShortcutChange('ctrl_enter')}
+                        className={`w-full px-3 py-2 text-left text-xs transition-colors flex items-center justify-between ${
+                          sendShortcut === 'ctrl_enter'
+                            ? 'bg-claude-accent/10 text-claude-accent'
+                            : 'dark:text-claude-darkText text-claude-text hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover'
+                        }`}
+                      >
+                        <span>按 Ctrl+Enter 发送</span>
+                        {sendShortcut === 'ctrl_enter' && (
+                          <svg className="h-3.5 w-3.5 text-claude-accent" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </>
         )}
