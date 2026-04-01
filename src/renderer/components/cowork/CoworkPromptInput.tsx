@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
-import { PaperAirplaneIcon, StopIcon, FolderIcon } from '@heroicons/react/24/solid';
+import { PaperAirplaneIcon, StopIcon, FolderIcon, ChevronDownIcon } from '@heroicons/react/24/solid';
 import { PhotoIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { configService } from '../../services/config';
+import type { AppConfig } from '../../config';
 import PaperClipIcon from '../icons/PaperClipIcon';
 import XMarkIcon from '../icons/XMarkIcon';
 import ModelSelector from '../ModelSelector';
@@ -119,10 +121,80 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     const [isDraggingFiles, setIsDraggingFiles] = useState(false);
     const [isAddingFile, setIsAddingFile] = useState(false);
     const [imageVisionHint, setImageVisionHint] = useState(false);
+    const [sendShortcut, setSendShortcut] = useState<AppConfig['sendMessageShortcut']>('enter');
+    const [customShortcutDisplay, setCustomShortcutDisplay] = useState('');
+    const [showShortcutMenu, setShowShortcutMenu] = useState(false);
+    
+    // Use ref to always have access to latest shortcut value in event handlers
+    const sendShortcutRef = useRef(sendShortcut);
+    useEffect(() => {
+      sendShortcutRef.current = sendShortcut;
+    }, [sendShortcut]);
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const folderButtonRef = useRef<HTMLButtonElement>(null);
+    const shortcutButtonRef = useRef<HTMLButtonElement>(null);
     const dragDepthRef = useRef(0);
+
+    // Load send shortcut from config on mount
+    useEffect(() => {
+      const config = configService.getConfig();
+      const shortcut = config.sendMessageShortcut ?? 'enter';
+      setSendShortcut(shortcut);
+      // If it's a custom shortcut (not 'enter' or 'ctrlEnter'), store it for display
+      if (shortcut !== 'enter' && shortcut !== 'ctrlEnter') {
+        setCustomShortcutDisplay(shortcut);
+      } else {
+        setCustomShortcutDisplay('');
+      }
+    }, []);
+
+    // Reload shortcut when menu opens (to sync with settings changes)
+    useEffect(() => {
+      if (showShortcutMenu) {
+        const config = configService.getConfig();
+        const shortcut = config.sendMessageShortcut ?? 'enter';
+        setSendShortcut(shortcut);
+        if (shortcut !== 'enter' && shortcut !== 'ctrlEnter') {
+          setCustomShortcutDisplay(shortcut);
+        } else {
+          setCustomShortcutDisplay('');
+        }
+      }
+    }, [showShortcutMenu]);
+
+    // Save send shortcut to config
+    const handleShortcutChange = useCallback(async (shortcut: AppConfig['sendMessageShortcut']) => {
+      console.log('[CoworkPromptInput] Changing shortcut to:', shortcut);
+      // Update state immediately for responsive UI
+      setSendShortcut(shortcut);
+      if (shortcut !== 'enter' && shortcut !== 'ctrlEnter') {
+        setCustomShortcutDisplay(shortcut);
+      } else {
+        setCustomShortcutDisplay('');
+      }
+      // Save to config (async, but UI already updated)
+      try {
+        await configService.updateConfig({ sendMessageShortcut: shortcut });
+        console.log('[CoworkPromptInput] Shortcut saved successfully');
+      } catch (error) {
+        console.error('[CoworkPromptInput] Failed to save shortcut:', error);
+      }
+      // Close menu after a short delay to ensure click is processed
+      setTimeout(() => setShowShortcutMenu(false), 50);
+    }, []);
+
+    // Close shortcut menu when clicking outside
+    useEffect(() => {
+      if (!showShortcutMenu) return;
+      const handleClickOutside = (e: MouseEvent) => {
+        if (shortcutButtonRef.current && !shortcutButtonRef.current.contains(e.target as Node)) {
+          setShowShortcutMenu(false);
+        }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showShortcutMenu]);
 
   // 暴露方法给父组件
   React.useImperativeHandle(ref, () => ({
@@ -285,21 +357,76 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     }
   }, [onManageSkills]);
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Enter to submit, any modifier+Enter (Shift/Ctrl/Cmd/Alt) for new line
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const currentShortcut = sendShortcutRef.current;
     const isComposing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
     if (event.key === 'Enter' && !isComposing) {
-      const hasModifier = event.shiftKey || event.ctrlKey || event.metaKey || event.altKey;
-      if (!hasModifier && !isStreaming && !disabled) {
-        event.preventDefault();
-        handleSubmit();
-      } else if (hasModifier && !event.shiftKey) {
-        // Shift+Enter already inserts newline natively; for Ctrl/Cmd/Alt+Enter, insert via execCommand to preserve undo history
-        event.preventDefault();
-        document.execCommand('insertText', false, '\n');
+      if (currentShortcut === 'enter') {
+        // Enter to submit, any modifier+Enter for new line
+        const hasModifier = event.shiftKey || event.ctrlKey || event.metaKey || event.altKey;
+        if (!hasModifier && !isStreaming && !disabled) {
+          event.preventDefault();
+          handleSubmit();
+        } else if (hasModifier && !event.shiftKey) {
+          // Shift+Enter already inserts newline natively; for Ctrl/Cmd/Alt+Enter, insert via execCommand to preserve undo history
+          event.preventDefault();
+          document.execCommand('insertText', false, '\n');
+        }
+      } else if (currentShortcut === 'ctrlEnter') {
+        // ctrlEnter mode: Ctrl/Cmd+Enter to submit, Enter for new line
+        const useCtrlEnter = event.ctrlKey || event.metaKey;
+        if (useCtrlEnter && !isStreaming && !disabled) {
+          event.preventDefault();
+          handleSubmit();
+        }
+        // Enter without modifier will naturally insert a new line
+      } else {
+        // Custom shortcut mode - parse the custom shortcut
+        const shortcutParts = currentShortcut.toLowerCase().split('+').map(s => s.trim());
+        const hasCtrl = shortcutParts.includes('ctrl') || shortcutParts.includes('cmd') || shortcutParts.includes('⌘');
+        const hasAlt = shortcutParts.includes('alt') || shortcutParts.includes('option');
+        const hasShift = shortcutParts.includes('shift');
+        const hasMeta = shortcutParts.includes('meta') || shortcutParts.includes('cmd') || shortcutParts.includes('⌘');
+        
+        const keyMatch = shortcutParts.find(part => 
+          !['ctrl', 'cmd', '⌘', 'alt', 'option', 'shift', 'meta'].includes(part)
+        );
+        
+        if (keyMatch) {
+          const matchesCtrl = hasCtrl === (event.ctrlKey || event.metaKey);
+          const matchesAlt = hasAlt === event.altKey;
+          const matchesShift = hasShift === event.shiftKey;
+          const matchesKey = event.key.toLowerCase() === keyMatch;
+          
+          if (matchesCtrl && matchesAlt && matchesShift && matchesKey && !isStreaming && !disabled) {
+            event.preventDefault();
+            handleSubmit();
+          }
+        }
+      }
+    } else if (currentShortcut && currentShortcut !== 'enter' && currentShortcut !== 'ctrlEnter') {
+      // Handle non-Enter custom shortcuts (e.g., Ctrl+S)
+      const shortcutParts = currentShortcut.toLowerCase().split('+').map(s => s.trim());
+      const hasCtrl = shortcutParts.includes('ctrl') || shortcutParts.includes('cmd') || shortcutParts.includes('⌘');
+      const hasAlt = shortcutParts.includes('alt') || shortcutParts.includes('option');
+      const hasShift = shortcutParts.includes('shift');
+      
+      const keyMatch = shortcutParts.find(part => 
+        !['ctrl', 'cmd', '⌘', 'alt', 'option', 'shift', 'meta'].includes(part)
+      );
+      
+      if (keyMatch && event.key.toLowerCase() === keyMatch) {
+        const matchesCtrl = hasCtrl === (event.ctrlKey || event.metaKey);
+        const matchesAlt = hasAlt === event.altKey;
+        const matchesShift = hasShift === event.shiftKey;
+        
+        if (matchesCtrl && matchesAlt && matchesShift && !isStreaming && !disabled) {
+          event.preventDefault();
+          handleSubmit();
+        }
       }
     }
-  };
+  }, [isStreaming, disabled, handleSubmit]);
 
   const handleStopClick = () => {
     if (onStop) {
@@ -587,6 +714,120 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
     ? `${containerClass} ring-2 ring-primary/50 border-primary/60`
     : containerClass;
 
+  // Determine platform for shortcut display
+  const isMac = typeof window !== 'undefined' && window.electron?.platform === 'darwin';
+
+  // Send button with dropdown
+  const renderSendButton = () => {
+    const baseButtonClass = isLarge
+      ? 'p-2 rounded-xl transition-all shadow-subtle hover:shadow-card active:scale-95'
+      : 'flex-shrink-0 p-2 rounded-lg transition-all shadow-subtle hover:shadow-card active:scale-95';
+    
+    const enabledButtonClass = 'bg-primary hover:bg-primary-hover text-white';
+    const disabledButtonClass = 'bg-primary/50 text-white/70 cursor-not-allowed';
+
+    if (isStreaming) {
+      return (
+        <button
+          type="button"
+          onClick={handleStopClick}
+          className={`${baseButtonClass} bg-red-500 hover:bg-red-600 text-white`}
+          aria-label="Stop"
+        >
+          <StopIcon className={isLarge ? 'h-5 w-5' : 'h-4 w-4'} />
+        </button>
+      );
+    }
+
+    return (
+      <div className="flex items-center relative">
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+          className={`${baseButtonClass} ${canSubmit ? enabledButtonClass : disabledButtonClass} rounded-r-none`}
+          aria-label="Send"
+        >
+          <PaperAirplaneIcon className={isLarge ? 'h-5 w-5' : 'h-4 w-4'} />
+        </button>
+        <button
+          ref={shortcutButtonRef}
+          type="button"
+          onClick={() => setShowShortcutMenu(!showShortcutMenu)}
+          disabled={disabled}
+          className={`${baseButtonClass} ${canSubmit ? enabledButtonClass : disabledButtonClass} rounded-l-none border-l border-white/20`}
+          aria-label="Send options"
+          title={i18nService.t('sendMessageShortcut')}
+        >
+          <ChevronDownIcon className={isLarge ? 'h-4 w-4' : 'h-3 w-3'} />
+        </button>
+        {showShortcutMenu && (
+          <div 
+            className={`fixed ${isLarge ? 'bottom-[80px] right-[20px]' : 'bottom-[60px] right-[20px]'} w-56 rounded-xl border border-border bg-surface shadow-elevated py-1`}
+            style={{ zIndex: 99999 }}
+          >
+            <button
+              type="button"
+              onClick={(e) => {
+                console.log('[CoworkPromptInput] Enter option clicked');
+                e.stopPropagation();
+                e.preventDefault();
+                handleShortcutChange('enter');
+              }}
+              className={`w-full px-3 py-2 text-left text-sm hover:bg-surface-raised transition-colors flex items-center justify-between ${sendShortcut === 'enter' ? 'text-primary' : 'text-foreground'}`}
+            >
+              <span>{i18nService.t('sendMessageShortcutEnter')}</span>
+              {sendShortcut === 'enter' && (
+                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                console.log('[CoworkPromptInput] Ctrl+Enter option clicked');
+                e.stopPropagation();
+                e.preventDefault();
+                handleShortcutChange('ctrlEnter');
+              }}
+              className={`w-full px-3 py-2 text-left text-sm hover:bg-surface-raised transition-colors flex items-center justify-between ${sendShortcut === 'ctrlEnter' ? 'text-primary' : 'text-foreground'}`}
+            >
+              <span>{isMac ? i18nService.t('sendMessageShortcutCmdEnter') : i18nService.t('sendMessageShortcutCtrlEnter')}</span>
+              {sendShortcut === 'ctrlEnter' && (
+                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              )}
+            </button>
+            
+            {/* Show custom shortcut option if user has set a custom shortcut */}
+            {customShortcutDisplay && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleShortcutChange(customShortcutDisplay as AppConfig['sendMessageShortcut']);
+                }}
+                className={`w-full px-3 py-2 text-left text-sm hover:bg-surface-raised transition-colors flex items-center justify-between ${(sendShortcut !== 'enter' && sendShortcut !== 'ctrlEnter') ? 'text-primary' : 'text-foreground'}`}
+              >
+                <span className="flex items-center gap-2">
+                  <span>{i18nService.t('shortcutNotSet')}</span>
+                  <span className="text-xs text-secondary bg-surface-raised px-1.5 py-0.5 rounded">{customShortcutDisplay}</span>
+                </span>
+                {(sendShortcut !== 'enter' && sendShortcut !== 'ctrlEnter') && (
+                  <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="relative">
       {attachments.length > 0 && (
@@ -714,26 +955,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
                 )}
               </div>
               <div className="flex items-center gap-2">
-                {isStreaming ? (
-                  <button
-                    type="button"
-                    onClick={handleStopClick}
-                    className="p-2 rounded-xl bg-red-500 hover:bg-red-600 text-white transition-all shadow-subtle hover:shadow-card active:scale-95"
-                    aria-label="Stop"
-                  >
-                    <StopIcon className="h-5 w-5" />
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleSubmit}
-                    disabled={!canSubmit}
-                    className="p-2 rounded-xl bg-primary hover:bg-primary-hover text-white transition-all shadow-subtle hover:shadow-card active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                    aria-label="Send"
-                  >
-                    <PaperAirplaneIcon className="h-5 w-5" />
-                  </button>
-                )}
+                {renderSendButton()}
               </div>
             </div>
           </>
@@ -766,26 +988,7 @@ const CoworkPromptInput = React.forwardRef<CoworkPromptInputRef, CoworkPromptInp
               </div>
             )}
 
-            {isStreaming ? (
-              <button
-                type="button"
-                onClick={handleStopClick}
-                className="flex-shrink-0 p-2 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-all shadow-subtle hover:shadow-card active:scale-95"
-                aria-label="Stop"
-              >
-                <StopIcon className="h-4 w-4" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!canSubmit}
-                className="flex-shrink-0 p-2 rounded-lg bg-primary hover:bg-primary-hover text-white transition-all shadow-subtle hover:shadow-card active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                aria-label="Send"
-              >
-                <PaperAirplaneIcon className="h-4 w-4" />
-              </button>
-            )}
+            {renderSendButton()}
           </>
         )}
       </div>

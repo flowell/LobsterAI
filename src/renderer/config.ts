@@ -228,6 +228,8 @@ export interface AppConfig {
     settings: string;
     [key: string]: string | undefined;
   };
+  // 消息发送快捷键模式
+  sendMessageShortcut?: 'enter' | 'ctrlEnter' | string; // string for custom shortcuts
 }
 
 /**
@@ -287,7 +289,8 @@ export const defaultConfig: AppConfig = {
     newChat: 'Ctrl+N',
     search: 'Ctrl+F',
     settings: 'Ctrl+,',
-  }
+  },
+  sendMessageShortcut: 'enter',
 };
 
 // 配置存储键

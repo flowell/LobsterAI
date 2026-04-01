@@ -511,6 +511,8 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
     search: 'Ctrl+F',
     settings: 'Ctrl+,',
   });
+  const [sendMessageShortcut, setSendMessageShortcut] = useState<'enter' | 'ctrlEnter' | string>('enter');
+  const [customSendShortcut, setCustomSendShortcut] = useState('');
 
   // State for model editing
   const [isAddingModel, setIsAddingModel] = useState(false);
@@ -891,6 +893,18 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
           ...prev,
           ...config.shortcuts,
         }));
+      }
+      
+      // 加载发送消息快捷键设置
+      if (config.sendMessageShortcut) {
+        const shortcut = config.sendMessageShortcut;
+        if (shortcut === 'enter' || shortcut === 'ctrlEnter') {
+          setSendMessageShortcut(shortcut);
+        } else {
+          // Custom shortcut
+          setSendMessageShortcut('custom');
+          setCustomSendShortcut(shortcut);
+        }
       }
     } catch (error) {
       setError('Failed to load settings');
@@ -1509,6 +1523,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
         language,
         useSystemProxy,
         shortcuts,
+        sendMessageShortcut: sendMessageShortcut === 'custom' ? customSendShortcut : sendMessageShortcut,
         app: {
           ...configService.getConfig().app,
           testMode,
@@ -3427,7 +3442,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
 
       case 'shortcuts':
         return (
-          <div className="space-y-5">
+          <div className="space-y-6">
             <div>
               <label className="block text-sm font-medium text-foreground mb-3">
                 {i18nService.t('keyboardShortcuts')}
@@ -3445,6 +3460,85 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
                   <span className="text-sm text-foreground">{i18nService.t('openSettings')}</span>
                   <ShortcutRecorder value={shortcuts.settings} onChange={(v) => handleShortcutChange('settings', v)} />
                 </div>
+              </div>
+            </div>
+            
+            <div className="pt-4 border-t border-border">
+              <label className="block text-sm font-medium text-foreground mb-3">
+                {i18nService.t('sendMessageShortcut')}
+              </label>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-foreground">{i18nService.t('sendMessageShortcutEnter')}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSendMessageShortcut('enter')}
+                    className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                      sendMessageShortcut === 'enter' 
+                        ? 'border-primary bg-primary' 
+                        : 'border-border hover:border-primary/50'
+                    }`}
+                  >
+                    {sendMessageShortcut === 'enter' && (
+                      <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-foreground">
+                    {typeof window !== 'undefined' && window.electron?.platform === 'darwin' 
+                      ? i18nService.t('sendMessageShortcutCmdEnter') 
+                      : i18nService.t('sendMessageShortcutCtrlEnter')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSendMessageShortcut('ctrlEnter')}
+                    className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                      sendMessageShortcut === 'ctrlEnter' 
+                        ? 'border-primary bg-primary' 
+                        : 'border-border hover:border-primary/50'
+                    }`}
+                  >
+                    {sendMessageShortcut === 'ctrlEnter' && (
+                      <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                
+                {/* Custom shortcut option - shown when user has custom shortcut or wants to set one */}
+                {(sendMessageShortcut === 'custom' || customSendShortcut) && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-foreground">{i18nService.t('shortcutNotSet')}</span>
+                    <div className="flex items-center gap-2">
+                      <ShortcutRecorder 
+                        value={customSendShortcut} 
+                        onChange={(v) => {
+                          setCustomSendShortcut(v);
+                          if (v) setSendMessageShortcut('custom');
+                        }} 
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setSendMessageShortcut('custom')}
+                        className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                          sendMessageShortcut === 'custom' 
+                            ? 'border-primary bg-primary' 
+                            : 'border-border hover:border-primary/50'
+                        }`}
+                      >
+                        {sendMessageShortcut === 'custom' && (
+                          <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
